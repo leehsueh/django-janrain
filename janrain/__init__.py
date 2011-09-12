@@ -1,2 +1,2 @@
-__author__ = "Mike O'Malley"
+__author__ = "Hain-Lee Hsueh"
 __version__ = (0, 1, 0)

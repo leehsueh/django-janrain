@@ -1,58 +1,74 @@
-from django.http import HttpResponse, HttpResponseRedirect
-from django.core.urlresolvers import reverse
-from django.conf import settings
+from django.shortcuts import render_to_response, redirect
 from django.contrib import auth
+from django.contrib.auth.forms import AuthenticationForm
 from django.views.decorators.csrf import csrf_exempt
-from django.shortcuts import render_to_response
+from django.conf import settings
 from django.template import RequestContext
+from django.core.urlresolvers import reverse
+from django.http import HttpResponse, HttpResponseRedirect, Http404
 
 import urllib, urllib2, json
 
+def test(request):
+	return HttpResponse('Hello world')
+
 @csrf_exempt
 def login(request):
-    try:
-        token = request.POST['token']
-    except KeyError:
-        # TODO: set ERROR to something
-        return HttpResponseRedirect('/')
+	if request.method == 'GET':
+		if 'next' in request.GET.keys():
+			next = request.GET['next']
+		else:
+			next = '/'
+		form = AuthenticationForm()
+		context = {
+			'next': next,
+			'form': form
+		}
+		return render_to_response(
+	        'janrain_login.html',
+	        context,
+	        context_instance=RequestContext(request)
+	    )
+	elif request.method == 'POST':
+		token = request.POST['token']
+		destination = request.POST.get('next', '/')
 
-    api_params = {
-        'token': token,
-        'apiKey': settings.JANRAIN_RPX_API_KEY,
-        'format': 'json',
-    }
+		api_key = settings.JANRAIN_API_KEY
 
-    janrain_response = urllib2.urlopen(
-            "https://rpxnow.com/api/v2/auth_info",
-            urllib.urlencode(api_params))
-    resp_json = janrain_response.read()
-    auth_info = json.loads(resp_json)
+		api_params = {
+	        'token': token,
+	        'apiKey': api_key,
+	        'format': 'json',   
+	    }
 
-    u = None
-    if auth_info['stat'] == 'ok':
-        profile = auth_info['profile']
-        u = auth.authenticate(profile=profile)
+	    # make the api call
+		http_response = urllib2.urlopen('https://rpxnow.com/api/v2/auth_info',
+	                            urllib.urlencode(api_params))
 
-    if u is not None:
-        request.user = u
-        auth.login(request, u)
-    try:
-        return HttpResponseRedirect(request.GET['redirect_to'])
-    except KeyError:
-        return HttpResponseRedirect('/')
+	    # read json response
+		auth_info_json = http_response.read()
+		auth_info = json.loads(auth_info_json)
+		if auth_info['stat'] == 'ok':
+			profile = auth_info['profile']
+
+			# identifier is the unique identifier used to sign user into site
+			identifier = profile['identifier']
+
+			# these fields MAY be in the profile, but are not guaranteed. it
+			# depends on the provider and their implementation.
+			name = profile.get('displayName')
+
+			# TODO: sign user in with custom backend
+			user = auth.authenticate(profile=profile)
+			auth.login(request, user)
+			return HttpResponseRedirect(destination)
+		else:
+            # TODO: make this more usable   
+			return HttpResponse("An error occurred: " + auth_info['err']['msg'])
 
 def logout(request):
     auth.logout(request)
     try:
-        return HttpResponseRedirect(request.GET['redirect_to'])
+        return HttpResponseRedirect(request.GET['next'])
     except KeyError:
         return HttpResponseRedirect('/')
-
-def loginpage(request):
-    context = {'next':request.GET['next']}
-    return render_to_response(
-        'janrain/loginpage.html',
-        context,
-        context_instance=RequestContext(request)
-    )
-    
